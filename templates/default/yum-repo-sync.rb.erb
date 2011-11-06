@@ -1,0 +1,233 @@
+#!/usr/bin/env ruby
+#
+# Copyright 2011, Stefano Harding, Tom Santos
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#
+# File managed by Chef on <%= node[:fqdn] %>
+#
+# This script is used to create and update local repositories for Fedora,
+# CentOS, Scientific Linux, Livna, RPMFusion and EPEL.
+#
+# List of available repositories. You can add/change repos here (i.e. to get
+# from a different source or to add additional repos to sync. If you add
+# additional repos you will need to add a target locates (listed below) and add
+# an opts.on in the options parser.
+#
+
+require 'fileutils'
+require 'optparse'
+require 'timeout'
+require 'ostruct'
+require 'resolv'
+require 'syslog'
+require 'socket'
+require 'thread'
+
+# Location of where to sync the repositories.
+yumdir = "<%= node[:yum][:mirror][:yumdir] %>"
+
+options = {:verbose => false, :arch => %w[<%= node[:yum][:mirror][:arch] %>], :iso => <%= node[:yum][:mirror][:iso] %>}
+
+repos = { :fedora    => { :source => '<%= node[:yum][:mirror][:fedora_mirror] %>',
+                          :target => "#{yumdir}/fedora/",
+                          :enable => <%= node[:yum][:mirror][:sync_fedora] %> },
+
+          :centos    => { :source => '<%= node[:yum][:mirror][:centos_mirror] %>',
+                          :target => "#{yumdir}/centos/",
+                          :enable => <%= node[:yum][:mirror][:sync_centos] %> },
+
+          :sl        => { :source => '<%= node[:yum][:mirror][:sl_mirror] %>',
+                          :target => "#{yumdir}/scientific/",
+                          :enable => <%= node[:yum][:mirror][:sync_sl] %> },
+
+          :rpmfusion => { :source => '<%= node[:yum][:mirror][:rpmfusion_mirror] %>',
+                          :target => "#{yumdir}/rpmfusion/",
+                          :enable => <%= node[:yum][:mirror][:sync_rpmfusion] %> },
+
+          :atrpms    => { :source => '<%= node[:yum][:mirror][:atrpms_mirror] %>',
+                          :target => "#{yumdir}/atrpms/",
+                          :enable => <%= node[:yum][:mirror][:sync_atrpms] %> },
+
+          :epel      => { :source => '<%= node[:yum][:mirror][:epel_mirror] %>',
+                          :target => "#{yumdir}/epel/",
+                          :enable => <%= node[:yum][:mirror][:sync_epel] %> },
+
+          :livna     => { :source => '<%= node[:yum][:mirror][:livna_mirror] %>',
+                          :target => "#{yumdir}/livna/",
+                          :enable => <%= node[:yum][:mirror][:sync_livna] %> },
+
+          :elff      => { :source => '<%= node[:yum][:mirror][:elff_mirror] %>',
+                          :target => "#{yumdir}/elff/",
+                          :enable => <%= node[:yum][:mirror][:sync_elff] %> },
+
+          :ius       => { :source => '<%= node[:yum][:mirror][:ius_mirror] %>',
+                          :target => "#{yumdir}/ius/",
+                          :enable => <%= node[:yum][:mirror][:sync_ius] %> },
+
+          :dag       => { :source => '<%= node[:yum][:mirror][:dag_mirror] %>',
+                          :target => "#{yumdir}/dag/",
+                          :enable => <%= node[:yum][:mirror][:sync_dag] %> },
+
+          :jpackage  => { :source => '<%= node[:yum][:mirror][:jpackage_mirror] %>',
+                          :target => "#{yumdir}/jpackage/",
+                          :enable => <%= node[:yum][:mirror][:sync_jpackage] %> }
+}
+
+# List of all available architectures and versions. Add any new ones here, the
+# script will strip out the ones you don't want.
+arch = %w[alpha amd64 arm armel hppa i386 i486 i586 ia64 m68k mips
+          mipsel powerpc ppc ppc64 sparc s390 s390x x86_64 ]
+
+# RSYNC Options
+rsync_opts = '-ahvhz --progress --partial --delete-after'
+
+FileUtils.mkdir(yumdir) unless File.directory?(yumdir)
+
+# Check if we are already running, exit if we are. This is done to avoid the
+# script launching more than once.
+def port_lock
+  Thread.new do
+    begin
+      server = TCPServer.new('127.0.0.1', 17553)
+      server.accept
+    rescue
+      raise("Someone's already bound to our port. We're outta here.")
+    end
+  end
+  sleep(1) # Give it a second to attempt the accept
+end
+
+# Nice way to log messages to syslog
+def log(message)
+  Syslog.open('yum-repo-sync', Syslog::LOG_PID | Syslog::LOG_CONS) { |s| s.warning message }
+end
+
+# Check if the host is responding.
+def port_open?(host, port)
+  begin
+    Timeout::timeout(1) do
+      begin
+        s = TCPSocket.new(host, port)
+        s.close
+        return true
+      rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
+        return false
+      end
+    end
+  rescue Timeout::Error
+  end
+  return false
+end
+
+# Run the rsync, gets passed a list of items to exclude and builds the exclude list.
+def rsync(source, target, exclude = [], options = [], verbose = false)
+  excludes = exclude.map {|e| "--exclude=#{e} "}
+  host = source.split(/\//)[2]
+  port = 873
+
+  # Make the target directory if it's not there.
+  FileUtils.mkdir(target) if !File.directory?(target)
+
+  begin
+    raise Exception, "Unable to connect to remote host #{source}" unless port_open?(host, port)
+
+    log("rsync #{options} #{excludes} #{source} #{target}")
+
+    if verbose
+      puts "RUNNING:  rsync #{options} #{excludes} #{source} #{target}"
+      system "rsync #{options} #{excludes} #{source} #{target}"
+    else
+      `rsync #{options} #{excludes} #{source} #{target}`
+    end
+
+  rescue Errno::EACCES, Errno::ENOENT, Errno::ENOTEMPTY, Exception => e
+    log(e.to_s)
+  end
+end
+
+# Display time in 1d 2h 10m 15s
+def display_time(total_seconds)
+  total_seconds = total_seconds.to_i
+
+  days = total_seconds / 86400
+  hours = (total_seconds / 3600) - (days * 24)
+  minutes = (total_seconds / 60) - (hours * 60) - (days * 1440)
+  seconds = total_seconds % 60
+
+  display = ''
+  display_concat = ''
+
+  if days > 0
+    display = display + display_concat + "#{days}d"
+    display_concat = ' '
+  end
+
+  if hours > 0 || display.length > 0
+    display = display + display_concat + "#{hours}h"
+    display_concat = ' '
+  end
+
+  if minutes > 0 || display.length > 0
+    display = display + display_concat + "#{minutes}m"
+    display_concat = ' '
+  end
+
+  display = display + display_concat + "#{seconds}s"
+  display
+end
+
+exclude_iso = Array.new
+
+opts = OptionParser.new do |opts|
+  opts.banner = "Usage: yum-repo-sync.rb [OPTIONS]"
+
+  opts.on('-v', '--verbose', 'Run in verbose mode') do
+    options[:verbose] = true
+  end
+
+  opts.on_tail('-h', '--help', 'Show this message') do
+    puts opts
+    exit
+  end
+end
+opts.parse!(ARGV)
+
+# Set a lock on the port to prevent us running more than once.
+port_lock
+
+log("Started running at: #{Time.now}")
+
+options[:arch].each {|a| arch.delete(a)}
+
+if options[:iso]
+  exclude = arch
+else
+  exclude = arch << '*.iso'
+end
+
+begining = Time.now
+
+repos.each do |key, val|
+  next unless repos[key.to_sym][:enable]
+
+  source = repos[key.to_sym][:source]
+  target = repos[key.to_sym][:target]
+
+  rsync(source, target, exclude, rsync_opts, options[:verbose])
+end
+
+log("Finished running at: #{Time.now} - Execution time: #{display_time(Time.now - begining)}")
+
+# vi:filetype=ruby:tabstop=2:expandtab

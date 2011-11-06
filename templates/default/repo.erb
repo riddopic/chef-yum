@@ -1,0 +1,49 @@
+#
+# File managed by Chef on <%= node[:fqdn] %>
+#
+
+[<%= @repo_name %>]
+name=<%= node[:platform] %> - $releasever - $basearch - <%= @repo_name %>
+failovermethod=<%= node[:yum][:failovermethod] -%>
+
+<% if @baseurl then -%>baseurl=<% @baseurl.each do |url| %> <%= url %><% end -%><% elsif @mirrorlist then -%>mirrorlist=<%= @mirrorlist %><% end -%>
+enabled=<%= @enabled %>
+metadata_expire=<%= node[:yum][:metadata_expire] %>
+<% if @gpgkey then -%>
+gpgcheck=<%= @gpgcheck %>
+gpgkey=<% @gpgkey.each do |key| %> <%= key %><% end -%>
+<% else -%>
+gpgcheck=false
+<% end -%>
+
+<% if @debug_mirrorlist || @debug_baseurl then -%>
+[<%= @repo_name %>-debuginfo]
+name=<%= node[:platform] %> - $releasever - $basearch - Debug
+failovermethod=<%= node[:yum][:failovermethod] -%>
+
+<% if @debug_baseurl then -%>baseurl=<% @debug_baseurl.each do |url| %> <%= url %><% end -%><% elsif @debug_mirrorlist then -%>mirrorlist=<%= @debug_mirrorlist %><% end -%>
+enabled=<%= @debug_enabled %>
+metadata_expire=<%= node[:yum][:metadata_expire] %>
+<% if @gpgkey then -%>
+gpgcheck=<%= @gpgcheck %>
+gpgkey=<% @gpgkey.each do |key| %> <%= key %><% end -%>
+<% else -%>
+gpgcheck=false
+<% end -%>
+<% end -%>
+
+<% if @source_mirrorlist || @source_baseurl then -%>
+[<%= @repo_name %>-source]
+name=<%= node[:platform] %> - $releasever - $basearch - Source
+failovermethod=<%= node[:yum][:failovermethod] -%>
+
+<% if @source_baseurl then -%>baseurl=<% @source_baseurl.each do |url| %> <%= url %><% end -%><% elsif @source_mirrorlist then -%>mirrorlist=<%= @source_mirrorlist %><% end -%>
+enabled=<%= @source_enabled %>
+metadata_expire=<%= node[:yum][:metadata_expire] %>
+<% if @gpgkey then -%>
+gpgcheck=<%= @gpgcheck %>
+gpgkey=<% @gpgkey.each do |key| %> <%= key %><% end -%>
+<% else -%>
+gpgcheck=false
+<% end -%>
+<% end -%>

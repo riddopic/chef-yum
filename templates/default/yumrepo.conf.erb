@@ -1,0 +1,29 @@
+#
+# File managed by Chef on <%= node[:fqdn] %>
+#
+
+<VirtualHost *:80>
+  ServerAdmin <%= node[:apache][:contact] %>
+  ServerName yumrepo
+  ServerAlias mirror yumrepo.ebrary.com
+  DocumentRoot <%= node[:yum][:mirror][:yumdir] %>/
+  RewriteEngine On
+
+  <Directory <%= node[:yum][:mirror][:yumdir] %>/>
+    Options Indexes Includes FollowSymLinks
+    order Allow,Deny
+    allow from All
+    deny from None
+  </Directory>
+
+  ErrorLog <%= node[:apache][:log_dir] %>/yumrepo-error.log 
+
+  # Possible values include: debug, info, notice, warn, error, crit,
+  # alert, emerg.
+  LogLevel warn
+
+  CustomLog <%= node[:apache][:log_dir] %>/yumrepo-access.log combined
+  ServerSignature On
+</VirtualHost>
+
+# vi:filetype=apache:tabstop=2:expandtab
